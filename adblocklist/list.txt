@@ -1,0 +1,8 @@
+[Adblock Plus 1.1]
+mitbbs.com##div#article_t_embed_text_
+taobao.com##div.shop-display
+trade.taobao.com##div#p4pblock1
+trade.taobao.com##div#rr-boughtitem-recommend
+lab.alipay.com##div.wow-plate
+lab.alipay.com##div#p4pad
+

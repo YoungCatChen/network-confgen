@@ -1,0 +1,6 @@
+# root's crontab:
+10 4 * * *  cd /path/to/.Admin && svn up && make download && make && make install
+# or
+10 4 * * *  { cd /path/to/.Admin && svn up && make download && make && make install; } 2>&1 >/dev/null
+
+# vim: set ft=crontab:

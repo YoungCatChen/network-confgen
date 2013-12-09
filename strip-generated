@@ -1,0 +1,23 @@
+#!/usr/bin/awk -f
+
+BEGIN {
+	output = 1;
+	
+	if (comment == "")
+		comment = "#";
+	
+	comment = comment comment comment comment;
+}
+
+$0 ~ "^" comment "==== Generated start ====" comment {
+	output = 0;
+}
+
+output == 1 {
+	print;
+}
+
+$0 ~ "^" comment "==== Generated end ====" comment {
+	output = 1;
+}
+

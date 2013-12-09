@@ -1,0 +1,9 @@
+#!/bin/sh
+
+echo '####==== Generated start ====####'
+echo
+echo '####---- google ipv6 ----####'
+cat "$1"
+echo
+echo '####==== Generated end ====####'
+

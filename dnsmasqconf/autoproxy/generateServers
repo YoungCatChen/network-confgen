@@ -1,0 +1,32 @@
+#!/bin/bash
+
+if [ -z "$PREFIX" ]; then
+	echo '$PREFIX is empty.' >&2
+	exit 1
+fi
+if [ -z "$1" ]; then
+	echo 'Need an argument specifying domains.' >&2
+	exit 1
+fi
+
+getvar()
+{
+	eval 'GETVAR=${'"$PREFIX$1"'}'
+}
+
+
+getvar 1
+
+if [ -z "$GETVAR" ]; then
+	exit 0
+fi
+
+for ((i=1; ; ++i)); do
+	getvar $i
+	[ -n "$GETVAR" ] || break
+
+	GETVAR="${GETVAR//%/#}"
+	echo "Found server $i: $GETVAR" >&2
+	sed -r "s%[^ ]+%server=/\\0/$GETVAR%" "$1"
+	echo
+done

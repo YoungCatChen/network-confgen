@@ -1,0 +1,428 @@
+<?php
+
+require_once dirname(__FILE__).'/../../common.php'; // RequireFunction checkCmdArg
+require_once dirname(__FILE__).'/../../common.php'; // RequireFunction forkAsBackground
+
+
+function exception_error_handler($errno, $errstr, $errfile, $errline ) {
+	throw new ErrorException($errstr, 0, $errno, $errfile, $errline);
+}
+
+set_error_handler('exception_error_handler');
+class EmptyObj { }
+
+
+try {
+	$datadir = basename(__FILE__) . '.data';
+	chdir(__FILE__ . '.data');
+	$configs = getConfig();
+	$onlineip = getIp();
+
+	if (checkCmdArg('make')) {
+		$r = makeConf();
+	} elseif (checkCmdArg('reload')) {
+		$r = reloadSquid();
+	} elseif (isset($_REQUEST['add'])) {
+		$r = addForward();
+	} elseif (isset($_REQUEST['genmark'])) {
+		$r = genBookmark();
+	} else {
+		$r = showForm();
+	}
+} catch (SystemException $ex) {
+	showException($ex, 500, 'Internal Error');
+	$r = 1;
+} catch (RuntimeException $ex) {
+	showException($ex, 500, 'Internal Error');
+	$r = 1;
+} catch (LogicException $ex) {
+	showException($ex, 400, 'Bad Request');
+	$r = 1;
+}
+
+exit($r);
+
+
+function showException($ex, $httpcode, $heading)
+{
+	if (isset($_SERVER['HTTP_HOST'])) {
+		header("$httpcode $heading");
+		
+		if (isset($_REQUEST['ajax'])) {
+			echo $heading . ': ' . $ex->getMessage();
+		} else {
+			echo "<h1>$httpcode $heading</h1><pre>", $ex, '</pre>';
+		}
+	} else {
+		echo $ex, "\n";
+	}
+}
+
+
+function& getConfig()
+{
+	$configs = parse_ini_file('config.ini.php');
+
+	//if (intval($configs['version_major']) < 3)
+	//	throw new RuntimeException('this script only support squid of verion 3 or higher.');
+
+	$configs['servers'] = array();
+
+	foreach ($configs as $key => $value) {
+		if (!preg_match('/^fwd(\d+)_(.+)$/', $key, $matched))
+			continue;
+
+		$index = intval($matched[1]);
+		$realkey = $matched[2];
+		$configs['servers'][$index][$realkey] = $value;
+	}
+
+	ksort($configs['servers']);
+
+	foreach ($configs['servers'] as $i => &$server) {
+		$server['index'] = $i;
+
+		if (!isset($server['local_port']) ||
+			!isset($server['remote_host']) ||
+			!isset($server['remote_port']) ||
+			!isset($server['auth_type']))
+			throw new RuntimeException('auth_type, local_port, remote_host and remote_port must all exist.');
+
+		$auth_type = $server['auth_type'];
+
+		if ($auth_type != 'pass' && $auth_type != 'add_auth')
+			throw new RuntimeException("auth_type can only be either 'pass' or 'add_auth'.");
+	}
+
+	return $configs;
+}
+
+function getIp()
+{
+	if (getenv('HTTP_CLIENT_IP')) {
+		$onlineip = getenv('HTTP_CLIENT_IP');
+	} elseif (getenv('HTTP_X_FORWARDED_FOR')) {
+		$onlineip = getenv('HTTP_X_FORWARDED_FOR');
+		if (preg_match('/[\da-fA-F]([\da-fA-F]*:)+[\da-fA-F]+|(\d+\.){3}\d+/', $onlineip, $parts))
+			$onlineip = $parts[0];
+		else
+			$onlineip = null;
+	} elseif (getenv('REMOTE_ADDR')) {
+		$onlineip = getenv('REMOTE_ADDR');
+	} else {
+		$onlineip = null;
+	}
+
+	return $onlineip;
+}
+
+function showForm()
+{
+	global $configs;
+	global $onlineip;
+	global $datadir;
+
+?><html>
+<head>
+<style>
+	th, td { text-align:left; padding:4px; }
+	td.submit { text-align:center; }
+	input.txt { width:95%; margin-left:6px; padding-left:5px; padding-right:5px; }
+	td.submit input { padding-left:10px; padding-right:10px; }
+</style>
+<script type='text/javascript' src='<?php echo $datadir; ?>/jquery.js'></script>
+<script type='text/javascript' src='<?php echo $datadir; ?>/form.js'></script>
+<body>
+<form action='#' method='post' id='form'>
+	<table>
+		<tr>
+			<th>Your IP:</th>
+			<td><?php echo $onlineip ? $onlineip : '[unknown]'; ?></td>
+		</tr>
+		<tr>
+			<th>Forwarding:</th>
+			<td>
+<?php
+	foreach ($configs['servers'] as $server) {
+		echo "<label><input type='radio' name='index' value='{$server['index']}' />",
+			"{$server['local_port']} =&gt; {$server['remote_host']}:{$server['remote_port']}",
+			"</label><br />";
+	}
+?>
+			</td>
+		</tr>
+		<tr>
+			<th>Username for that server:</th>
+			<td><input class='txt' type='text' id='form-user' name='user' /></td>
+		</tr>
+		<tr>
+			<th>Password of the user:</th>
+			<td><input class='txt' type='password' id='form-pass' name='pass' /></td>
+		</tr>
+		<tr>
+			<td colspan='2' class='submit'>
+				<input id='form-submit' type='submit' name='add' />
+				<input id='form-genmark' type='button' name='genmark' value='Generate a fast URL' />
+			</td>
+		</tr>
+		<tr>
+			<td colspan='2' id='results'></td>
+		</tr>
+	</table>
+</form>
+</body>
+</html>
+<?php
+	return 0;
+}
+
+
+function checkParams()
+{
+	global $configs;
+
+	if (!isset($_REQUEST['index']))
+		throw new InvalidArgumentException("request param 'index' must be set.");
+	if (!isset($_REQUEST['user']))
+		throw new InvalidArgumentException("request param 'user' must be set.");
+	if (!isset($_REQUEST['pass']))
+		throw new InvalidArgumentException("request param 'user' must be set.");
+
+	$index = intval($_REQUEST['index']);
+	$user = $_REQUEST['user'];
+	$pass = $_REQUEST['pass'];
+	$ajax = isset($_REQUEST['ajax']) ? intval($_REQUEST['ajax']) : 0;
+
+	$user = trim($user);
+	$pass = trim($pass);
+	if ($user == '')
+		$user = '*';
+	if ($pass == '')
+		$pass = '*';
+
+	if (!isset($configs['servers'][$index]))
+		throw new OutOfRangeException("param 'index' out of bound");
+
+	return array($index, $user, $pass, ($ajax ? true : false));
+}
+
+function addForward()
+{
+	global $configs;
+	global $onlineip;
+
+	list($index, $user, $pass, $ajax) = checkParams();
+
+	if ($onlineip == null)
+		throw new InvalidArgumentException('unable to find your ip');
+
+	// Overall process:
+	//  Lock(pwd), update(pwd), lock(mark), unlock(pwd).
+	//  Fork, child return / parent wait.
+	//  Lock(all pwd), reload, unlock(mark), unload(all pwd).
+
+	$now = gettimeofday();
+	$ip = $onlineip . "\t";
+	$adding = "$ip{$now['sec']}\t$user:$pass\n";
+
+	// Lock(pwd)
+	$fwdfile = @fopen("fwd$index.txt.php", 'r+b');
+	flock($fwdfile, LOCK_EX);
+
+	// Update(pwd)
+	$data = array();
+
+	while (!feof($fwdfile)) {
+		$str = trim(fgets($fwdfile, 4096));
+
+		if ($str == '')
+			continue;
+		if (strncmp($str, $ip, strlen($ip)) != 0)
+			$data[] = $str;
+	}
+
+	$data[] = $adding;
+	rewind($fwdfile);
+	fwrite($fwdfile, join("\n", $data));
+	ftruncate($fwdfile, ftell($fwdfile));
+
+	// Lock(mark)
+	$markfile = @fopen('index.html', 'rb');
+	$locked = flock($markfile, LOCK_EX | LOCK_NB);
+
+	// Unlock(pwd)
+	flock($fwdfile, LOCK_UN);
+	fclose($fwdfile);
+
+	echo "Added $onlineip . Squid will reload its conf in 10 seconds.";
+	
+	if (!$locked)
+		fclose($markfile);
+	else
+		forkAsBackground('addForward_background', $markfile);
+}
+
+function addForward_background($markfile)
+{
+	global $configs;
+	sleep(10);
+
+	// Lock(all pwd)
+	$fwdfiles = array();
+
+	foreach ($configs['servers'] as $i => &$server) {
+		$fwdfile = @fopen("fwd$i.txt.php", 'rb');
+		flock($fwdfile, LOCK_EX);
+		$fwdfiles[] = $fwdfile;
+	}
+
+	// Reload
+	makeConf();
+	reloadSquid();
+
+	// Unlock(mark)
+	flock($markfile, LOCK_UN);
+	fclose($markfile);
+
+	// Unlock(all pwd)
+	foreach (array_reverse($fwdfiles) as $fwdfile) {
+		flock($fwdfile, LOCK_UN);
+		fclose($fwdfile);
+	}
+}
+
+
+function genBookmark()
+{
+	throw new RuntimeException('not implemented.');
+}
+
+
+function reloadSquid()
+{
+	global $configs;
+	
+	passthru("{$configs['squid_conf']}/reload-squid", $returnval);
+	return $returnval;
+}
+
+
+function appendReplace(&$array, $config)
+{
+	foreach ($config as $key => $value)
+		$array['{'.$key.'}'] = $value;
+}
+
+function makeConf()
+{
+	global $configs;
+
+	$now = gettimeofday();
+	$iphashes = array();
+	$servers =& $configs['servers'];
+
+	foreach ($servers as &$server) {
+		$server['passes'] = array();
+		$passwdfilename = "fwd{$server['index']}.txt.php";
+		
+		try {
+			$passwdfile = file($passwdfilename);
+		} catch (ErrorException $ex) {
+			file_put_contents($passwdfilename, '<'.'?php die; ?'.">\n\n");
+			chmod($passwdfilename, 0666);
+			$passwdfile = array();
+		}
+
+		foreach ($passwdfile as $line) {
+			$parts = explode("\t", trim($line));
+
+			if (count($parts) != 3)
+				continue;
+			if (intval($parts[1]) > 0 && intval($parts[1]) < $now['sec'] - 12*3600)
+				continue;
+
+			$ip = $parts[0];
+			$pass = $parts[2];
+
+			$iphashes[$ip] = '';
+			$server['passes'][$pass][$ip] =& $iphashes[$ip];
+		}
+	}
+
+	$strs = array('# vim: set ft=squid:', '', '#acl needauth proxy_auth blabla...');
+
+	foreach ($iphashes as $ipkey => $ipvalue) {
+		$crc = strtoupper(bin2hex(mhash(MHASH_CRC32, $ipkey)));
+		$iphashes[$ipkey] = $crc;
+		$strs[] = "acl acl_u$crc src $ipkey";
+	}
+
+	//print_r($servers);
+
+	foreach ($servers as &$server) {
+		$fwdid = "fwd{$server['index']}";
+		$strs[] = '';
+		$strs[] = "http_port {$server['local_port']}";
+		$strs[] = "acl acl_$fwdid myport {$server['local_port']}";
+		$strs[] = '';
+
+		$cachepeerline = "cache_peer {$server['remote_host']} parent {$server['remote_port']} 0 "
+			. "no-query allow-miss";
+
+		switch ($server['auth_type']) {
+		case 'pass':
+			$strs[] = makePassServerConf($server, $fwdid, $cachepeerline);
+			break;
+		case 'add_auth':
+			$strs[] = makeAddAuthServerConf($server, $fwdid, $cachepeerline);
+			break;
+		}
+	}
+
+	$strs[] = '';
+	$result = join("\n", $strs);
+	file_put_contents("{$configs['squid_conf']}/forward/forward.conf", $result);
+	//echo $result;
+
+	return 0;
+}
+
+function makePassServerConf(&$server, $fwdid, $cachepeerline)
+{
+	$strs = array();
+
+	foreach ($server['passes'] as $pass => $users) {
+		$crc = strtoupper(bin2hex(mhash(MHASH_CRC32, $pass)));
+		$peername = "peer_{$fwdid}_p$crc";
+		$strs[] = "$cachepeerline login=$pass name=$peername";
+
+		foreach ($users as $ip => $ipcrc)
+			$strs[] = "cache_peer_access $peername allow acl_$fwdid acl_u$ipcrc";
+	}
+
+	$peername = "peer_{$fwdid}_needauth";
+	$strs[] = "$cachepeerline login=PASS name=$peername";
+	$strs[] = "cache_peer_access $peername allow acl_$fwdid";
+	return join("\n", $strs);
+}
+
+function makeAddAuthServerConf(&$server, $fwdid, $cachepeerline)
+{
+	global $configs;
+	$peername = "peer_$fwdid";
+	$correctpass = "{$configs['addauth_user']}:{$configs['addauth_pass']}";
+
+	$strs = array("$cachepeerline login=PASS name=$peername",
+		"cache_peer_access peer_{$fwdid} allow acl_$fwdid");
+
+	foreach ($server['passes'] as $pass => $users) {
+		if ($pass != $correctpass)
+			continue;
+
+		foreach ($users as $ip => $ipcrc)
+			$strs[] = "http_access allow acl_$fwdid acl_u$ipcrc";
+	}
+
+	$strs[] = "http_access allow acl_$fwdid needauth";
+	return join("\n", $strs);
+}

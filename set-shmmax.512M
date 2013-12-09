@@ -1,0 +1,5 @@
+#!/bin/bash
+
+MAX=$(( 512 * 1024 * 1024 ))
+echo $MAX > /proc/sys/kernel/shmmax
+echo "kernel.shmmax = $MAX" > /etc/sysctl.d/60-shmmax.conf

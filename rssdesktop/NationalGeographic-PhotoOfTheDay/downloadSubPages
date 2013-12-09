@@ -1,0 +1,44 @@
+#!/bin/bash
+set -o errexit
+
+if [ x"$P" = x ]; then
+       P=.
+fi
+if [ x"$wget" = x ]; then
+	wget=wget
+fi
+
+errflag="$P/errflag.tmp"
+rm -f "$errflag"
+
+
+egrep -o '<feedburner:origLink[^<]*' "$1" | sed -r 's/<feedburner:origLink>//' | while read url
+do
+	locfile="$P/PAGE_`basename "$url"`.html"
+
+	if [ ! -f "$locfile" ]; then
+		if "$wget" -O "$locfile~" "$url"; then
+			mv -f "$locfile~" "$locfile"
+		else
+			echo "$url" >> "$errflag"
+		fi
+	fi
+
+	imgurl="`grep download_link "$locfile" | grep -o 'http:[^"]*' || true`"
+
+	if [ x"$imgurl" = x ]; then
+		imgurl="`grep -A 9 'class="primary_photo"' "$locfile" | grep -o 'http:[^"]*'`"
+	fi
+
+	echo "$url  @@@  $imgurl"
+done
+
+
+if [ -f "$errflag" ]; then
+	wc="`wc -l "$errflag"`"
+	echo "$wc error(s) occurred when downloading the HTMLs." >&2
+	exit 1
+fi
+
+exit 0
+

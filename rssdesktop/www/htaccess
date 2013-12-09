@@ -1,0 +1,7 @@
+RewriteEngine on
+Options +FollowSymLinks -Indexes -MultiViews
+
+RewriteCond  %{REQUEST_FILENAME}  !^index\.php$
+RewriteRule  ^  index.php  [QSA,L]
+
+# vim: set ft=apache:

@@ -1,0 +1,123 @@
+#!/bin/bash
+DIR=$(dirname "${BASH_SOURCE[0]}")
+
+cat <<END
+// <?php die('no direct access'); ?>
+
+function regExpMatch(url, pattern) {
+	try { return new RegExp(pattern).test(url); } catch(ex) { return false; }
+}
+
+function isGfw(url) {
+END
+
+NUM="$1"
+shift
+for ((i=0; i<$NUM; ++i)); do
+	"$DIR"/autoproxy.awk "$1"
+	shift
+done
+
+cat <<END
+	return 0;
+}
+
+function isAlwaysDirectHost(host) {
+	if (isPlainHostName(host))
+		return 1;
+	return 0;
+}
+
+function isAlwaysDirectIp(iplist, ip) {
+	if (iplist == '')
+		return 1;
+END
+
+"$DIR"/freeip.awk "$4" "$5"
+
+cat <<END
+	return 0;
+}
+
+function isFreeIp(ip) {
+END
+
+"$DIR"/freeip.awk "$6" "$7" "$8"
+
+cat <<END
+	return 0;
+}
+
+function isPku(ip) {
+END
+
+"$DIR"/freeip.awk "$9"
+
+cat <<END
+	return 0;
+}
+
+function hasV6(iplist) {
+	return (iplist.indexOf(':') >= 0);
+}
+
+function dnsResolveList(host) {
+	var iplist;
+
+	if (dnsResolveEx)
+		iplist = dnsResolveEx(host);
+	else
+		iplist = dnsResolve(host);
+	
+	//alert("IPList - " + iplist);
+
+	if (iplist == null || iplist == '')
+		return '';
+	
+	if (sortIpAddressList)
+		iplist = sortIpAddressList(iplist);
+
+	//alert("Sorted IPList - " + iplist);
+	return iplist;
+}
+
+function getV4Ip(iplist) {
+	var ip = iplist.replace(/.*;/, '');
+
+	if (ip.indexOf(':') >= 0)
+		return '';
+	else
+		return ip;
+}
+
+function FindProxyForURL(url, host) {
+	if (isAlwaysDirectHost(host))
+		return 'DIRECT';
+	if (gfwProxy != null && isGfw(url))
+		return gfwProxy;
+	if (v6Proxy == null && pkuProxy == null && abroadProxy == null && defProxy != null)
+		return defProxy;
+
+	var iplist = dnsResolveList(host);
+	var ip = getV4Ip(iplist);
+
+	if (isAlwaysDirectIp(iplist, ip))
+		return 'DIRECT';
+	if (v6Proxy != null && hasV6(iplist))
+		return v6Proxy;
+	if (pkuProxy != null && ip != '' && isPku(ip))
+		return pkuProxy;
+	if (abroadProxy != null && ip != '' && !isFreeIp(ip))
+		return abroadProxy;
+	if (defProxy != null)
+		return defProxy;
+
+	return 'DIRECT';
+}
+
+function FindProxyForURLEx(url, host) {
+	return FindProxyForURL(url, host);
+}
+END
+
+echo '// v''im: set ft=javascript:'

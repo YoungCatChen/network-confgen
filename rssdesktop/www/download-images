@@ -1,0 +1,13 @@
+#!/bin/bash
+
+DIR="$1"
+shift
+
+while read URL; do
+	FILE="`basename "$URL"`"
+	[ ! -f "$DIR/$FILE" ] && \
+		wget -nv -O "$DIR/$FILE~" "$URL" && \
+		mv -f "$DIR/$FILE~" "$DIR/$FILE"
+done < "$@"
+
+true

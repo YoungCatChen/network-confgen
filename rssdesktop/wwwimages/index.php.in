@@ -1,0 +1,77 @@
+<?php
+
+require_once dirname(__FILE__).'/../../common.php'; // RequireFunction forkAsBackground
+
+$pwd = dirname(__FILE__);
+$request = isset($_SERVER['REDIRECT_URL']) ? $_SERVER['REDIRECT_URL'] : '';
+
+if (!preg_match('%(/[^/]+)$%m', $request, $matches))
+	notfound_noreturn();
+
+$name = $matches[1];
+$imglist = fopen("$pwd/../imglist.txt", 'rb');
+$found = '';
+
+while (1)
+{
+	$line = fgets($imglist);
+
+	if ($line === FALSE)
+		break;
+
+	if (strstr($line, $name) !== FALSE) {
+		$found = $line;
+		break;
+	}
+}
+
+fclose($imglist);
+
+if (!$found)
+	notfound_noreturn();
+
+// Finally we found the image and tell the client
+header("Location: $found");
+
+
+// Lock
+$lockex = @fopen("$pwd/lockex", 'rb');
+
+if (!$lockex)
+	return 1;
+
+$locked = flock($lockex, LOCK_EX | LOCK_NB);
+
+if (!$locked) {
+	fclose($lockex);
+} else {
+	// Fork
+	forkAsBackground('downloadImages', $lockex);
+}
+
+
+function downloadImages($lockex)
+{
+	global $pwd;
+
+	// Sleep
+	sleep(1);
+
+	// Download
+	$retval = 0;
+	passthru("'$pwd/../download-images' '$pwd' '$pwd/../imglist.txt'", $retval);
+
+	// Unlock
+	flock($lockex, LOCK_UN);
+	fclose($lockex);
+	return $retval;
+}
+
+function notfound_noreturn()
+{
+	header('HTTP/1.0 404 Not Found');
+	header('Status: 404 Not Found');
+	echo "<h1>404 Not Found</h1>\n";
+	exit(1);
+}
+
